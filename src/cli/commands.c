@@ -69,19 +69,32 @@ err_t cmd_onboard(config_t* config, int argc, char** argv) {
     printf("╚══════════════════════════════════════════════════════════╝\n\n");
 
     // API Key
-    str_t api_key = prompt_input("Enter your API key (OpenRouter/Anthropic/OpenAI)", NULL);
+    printf("\nAvailable providers: openrouter, anthropic, openai, kimi, deepseek\n");
+    str_t api_key = prompt_input("Enter your API key", NULL);
     if (!str_empty(api_key)) {
         config->api_key = api_key;
     }
 
     // Provider
-    str_t provider = prompt_input("Default provider", "openrouter");
+    str_t provider = prompt_input("Default provider (openrouter/anthropic/openai/kimi/deepseek)", "openrouter");
     if (!str_empty(provider)) {
         config->default_provider = provider;
     }
 
-    // Model
-    str_t model = prompt_input("Default model", "anthropic/claude-3.5-sonnet");
+    // Model - suggest appropriate default based on provider
+    const char* default_model = "anthropic/claude-3.5-sonnet";
+    // Use the effective provider value (user input or default)
+    const char* effective_provider = str_empty(provider) ? "openrouter" : provider.data;
+    if (strcmp(effective_provider, "kimi") == 0) {
+        default_model = "moonshot-k2.5";
+    } else if (strcmp(effective_provider, "deepseek") == 0) {
+        default_model = "deepseek-chat";
+    } else if (strcmp(effective_provider, "anthropic") == 0) {
+        default_model = "claude-3-5-sonnet-20241022";
+    } else if (strcmp(effective_provider, "openai") == 0) {
+        default_model = "gpt-4o";
+    }
+    str_t model = prompt_input("Default model", default_model);
     if (!str_empty(model)) {
         config->default_model = model;
     }

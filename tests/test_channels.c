@@ -7,6 +7,7 @@
 #include "core/error.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -41,12 +42,10 @@ static bool g_message_received = false;
 static void test_message_callback(channel_message_t* msg, void* user_data) {
     (void)user_data;
 
-    // Copy the message for verification
-    if (g_last_received_message.content.data) {
-        free((void*)g_last_received_message.content.data);
-        free((void*)g_last_received_message.sender.data);
-        free((void*)g_last_received_message.channel.data);
-    }
+    // Free any previously stored data
+    free((void*)g_last_received_message.content.data);
+    free((void*)g_last_received_message.sender.data);
+    free((void*)g_last_received_message.channel.data);
 
     g_last_received_message.content.data = strdup(msg->content.data);
     g_last_received_message.content.len = msg->content.len;
@@ -61,12 +60,10 @@ static void test_message_callback(channel_message_t* msg, void* user_data) {
 
 // Cleanup test message
 static void cleanup_test_message(void) {
-    if (g_last_received_message.content.data) {
-        free((void*)g_last_received_message.content.data);
-        free((void*)g_last_received_message.sender.data);
-        free((void*)g_last_received_message.channel.data);
-        memset(&g_last_received_message, 0, sizeof(g_last_received_message));
-    }
+    free((void*)g_last_received_message.content.data);
+    free((void*)g_last_received_message.sender.data);
+    free((void*)g_last_received_message.channel.data);
+    memset(&g_last_received_message, 0, sizeof(g_last_received_message));
     g_message_received = false;
 }
 
@@ -102,10 +99,10 @@ static bool test_webhook_creation(void) {
 
     // Create webhook channel configuration
     channel_config_t config = channel_config_default();
-    config.name = STR_LIT("test-webhook");
-    config.type = STR_LIT("webhook");
+    config.name = str_dup_cstr("test-webhook", NULL);
+    config.type = str_dup_cstr("webhook", NULL);
     config.port = 9999; // Use test port
-    config.host = STR_LIT("127.0.0.1");
+    config.host = str_dup_cstr("127.0.0.1", NULL);
     config.auto_start = false;
 
     // Create channel
@@ -138,10 +135,10 @@ static bool test_webhook_listening(void) {
 
     // Create webhook channel
     channel_config_t config = channel_config_default();
-    config.name = STR_LIT("test-listening");
-    config.type = STR_LIT("webhook");
+    config.name = str_dup_cstr("test-listening", NULL);
+    config.type = str_dup_cstr("webhook", NULL);
     config.port = 9998;
-    config.host = STR_LIT("127.0.0.1");
+    config.host = str_dup_cstr("127.0.0.1", NULL);
     config.auto_start = false;
 
     channel_t* channel = NULL;
@@ -188,10 +185,10 @@ static bool test_channel_manager(void) {
 
     // Create a webhook channel
     channel_config_t config = channel_config_default();
-    config.name = STR_LIT("manager-test");
-    config.type = STR_LIT("webhook");
+    config.name = str_dup_cstr("manager-test", NULL);
+    config.type = str_dup_cstr("webhook", NULL);
     config.port = 9997;
-    config.host = STR_LIT("127.0.0.1");
+    config.host = str_dup_cstr("127.0.0.1", NULL);
     config.auto_start = false;
 
     channel_t* channel = NULL;
@@ -232,9 +229,9 @@ static bool test_message_sending(void) {
 
     // Create webhook channel with webhook URL (simulated)
     channel_config_t config = channel_config_default();
-    config.name = STR_LIT("send-test");
-    config.type = STR_LIT("webhook");
-    config.webhook_url = STR_LIT("http://example.com/webhook");
+    config.name = str_dup_cstr("send-test", NULL);
+    config.type = str_dup_cstr("webhook", NULL);
+    config.webhook_url = str_dup_cstr("http://example.com/webhook", NULL);
     config.auto_start = false;
 
     channel_t* channel = NULL;
@@ -272,10 +269,10 @@ static bool test_health_check(void) {
 
     // Create webhook channel
     channel_config_t config = channel_config_default();
-    config.name = STR_LIT("health-test");
-    config.type = STR_LIT("webhook");
+    config.name = str_dup_cstr("health-test", NULL);
+    config.type = str_dup_cstr("webhook", NULL);
     config.port = 9996;
-    config.host = STR_LIT("127.0.0.1");
+    config.host = str_dup_cstr("127.0.0.1", NULL);
     config.auto_start = false;
 
     channel_t* channel = NULL;

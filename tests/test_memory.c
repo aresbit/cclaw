@@ -4,6 +4,7 @@
 #include "core/memory.h"
 #include "core/error.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define TEST(expr) \

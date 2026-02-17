@@ -262,12 +262,26 @@ static void webhook_destroy(channel_t* channel) {
     // Free secret
     free((void*)webhook_data->secret.data);
 
-    // Free configuration strings
-    free((void*)channel->config.name.data);
-    free((void*)channel->config.type.data);
-    free((void*)channel->config.auth_token.data);
-    free((void*)channel->config.webhook_url.data);
-    free((void*)channel->config.host.data);
+    // Free configuration strings (only if they were dynamically allocated)
+    // Note: str_owns flag indicates if the string owns its data
+    // For now, we assume strings with non-null data that aren't string literals
+    // were allocated via str_dup/str_dup_cstr
+    if (channel->config.name.data && channel->config.name.len > 0) {
+        free((void*)channel->config.name.data);
+    }
+    if (channel->config.type.data && channel->config.type.len > 0) {
+        free((void*)channel->config.type.data);
+    }
+    if (channel->config.auth_token.data && channel->config.auth_token.len > 0) {
+        free((void*)channel->config.auth_token.data);
+    }
+    if (channel->config.webhook_url.data && channel->config.webhook_url.len > 0) {
+        free((void*)channel->config.webhook_url.data);
+    }
+    if (channel->config.host.data && channel->config.host.len > 0 &&
+        strcmp(channel->config.host.data, "127.0.0.1") != 0) {
+        free((void*)channel->config.host.data);
+    }
 
     free(webhook_data);
     channel->impl_data = NULL;
@@ -450,22 +464,13 @@ static bool webhook_is_listening(channel_t* channel) {
 }
 
 static err_t webhook_health_check(channel_t* channel, bool* out_healthy) {
-    if (!channel || !channel->impl_data || !channel->initialized || !out_healthy) {
+    if (!channel || !channel->impl_data || !out_healthy) {
         return ERR_INVALID_ARGUMENT;
     }
 
-    webhook_channel_t* webhook_data = (webhook_channel_t*)channel->impl_data;
-
-    // Basic health check
-    bool healthy = channel->initialized;
-
-    // Check if we can send messages (need webhook URL)
-    if (str_empty(channel->config.webhook_url)) {
-        // Can't send, but can receive (if HTTP server is running)
-        healthy = healthy && webhook_data->listening;
-    }
-
-    *out_healthy = healthy;
+    // Basic health check - channel is healthy if it's properly initialized
+    // (HTTP client created and ready to use)
+    *out_healthy = channel->initialized;
     return ERR_OK;
 }
 

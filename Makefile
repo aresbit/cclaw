@@ -103,7 +103,7 @@ ALL_OBJS := $(CORE_OBJS) $(PROVIDER_OBJS) $(CHANNEL_OBJS) $(MEMORY_OBJS) \
 # Test files
 TEST_SRCS := $(wildcard $(TESTS_DIR)/*.c)
 TEST_OBJS := $(patsubst $(TESTS_DIR)/%.c,$(BUILD_DIR)/tests/%.o,$(TEST_SRCS))
-TEST_BIN := $(BIN_DIR)/test_$(NAME)
+TEST_BINS := $(patsubst $(TESTS_DIR)/%.c,$(BIN_DIR)/test_%,$(TEST_SRCS))
 
 # Development tools
 LINTER := clang-tidy
@@ -155,24 +155,22 @@ $(BUILD_DIR)/tests/%.o: $(TESTS_DIR)/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Memory test
-MEMORY_TEST_SRC := $(TESTS_DIR)/test_memory.c
-MEMORY_TEST_OBJ := $(BUILD_DIR)/tests/test_memory.o
-MEMORY_TEST_BIN := $(BIN_DIR)/test_memory
-
-memory_test: $(MEMORY_TEST_BIN)
-	@echo "Running memory tests..."
-	@$(MEMORY_TEST_BIN)
-
-$(MEMORY_TEST_BIN): $(MEMORY_TEST_OBJ) $(filter-out $(MAIN_OBJ),$(ALL_OBJS))
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
-
-# Test executable
-test: $(TEST_BIN)
+# Test executables - each test file becomes its own binary
+test: dirs $(TEST_BINS)
 	@echo "Running tests..."
-	@$(TEST_BIN)
+	@failed=0; for test in $(TEST_BINS); do \
+		echo "Running $$test..."; \
+		$$test || failed=$$((failed + 1)); \
+	done; \
+	if [ $$failed -gt 0 ]; then \
+		echo "$$failed test(s) failed"; \
+		exit 1; \
+	else \
+		echo "All tests passed!"; \
+	fi
 
-$(TEST_BIN): $(TEST_OBJS) $(filter-out $(MAIN_OBJ),$(ALL_OBJS))
+$(BIN_DIR)/test_%: $(BUILD_DIR)/tests/%.o $(filter-out $(MAIN_OBJ),$(ALL_OBJS))
+	@mkdir -p $(BIN_DIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 # Development tools

@@ -4,6 +4,7 @@
 
 #include "core/agent.h"
 #include "core/alloc.h"
+#include "core/channel.h"
 #include "cclaw.h"
 
 #include <stdio.h>
@@ -784,3 +785,48 @@ static const agent_vtable_t g_default_vtable = {
 const agent_vtable_t* agent_get_default_vtable(void) {
     return &g_default_vtable;
 }
+
+// ============================================================================
+// Core CClaw API
+// ============================================================================
+
+err_t cclaw_init(void) {
+    fprintf(stderr, "Initializing CClaw v%s\n", CCLAW_VERSION_STRING);
+
+    // Initialize subsystems
+    err_t err = channel_registry_init();
+    if (err != ERR_OK) {
+        fprintf(stderr, "Failed to initialize channel registry: %s\n", error_to_string(err));
+        return err;
+    }
+
+    return ERR_OK;
+}
+
+void cclaw_shutdown(void) {
+    fprintf(stderr, "Shutting down CClaw\n");
+    channel_registry_shutdown();
+}
+
+void cclaw_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch) {
+    if (major) *major = CCLAW_VERSION_MAJOR;
+    if (minor) *minor = CCLAW_VERSION_MINOR;
+    if (patch) *patch = CCLAW_VERSION_PATCH;
+}
+
+const char* cclaw_get_version_string(void) {
+    return CCLAW_VERSION_STRING;
+}
+
+const char* cclaw_get_platform_name(void) {
+    if (CCLAW_PLATFORM_WINDOWS) return "Windows";
+    if (CCLAW_PLATFORM_LINUX) return "Linux";
+    if (CCLAW_PLATFORM_MACOS) return "macOS";
+    if (CCLAW_PLATFORM_ANDROID) return "Android";
+    return "Unknown";
+}
+
+bool cclaw_is_platform_windows(void) { return CCLAW_PLATFORM_WINDOWS; }
+bool cclaw_is_platform_linux(void) { return CCLAW_PLATFORM_LINUX; }
+bool cclaw_is_platform_macos(void) { return CCLAW_PLATFORM_MACOS; }
+bool cclaw_is_platform_android(void) { return CCLAW_PLATFORM_ANDROID; }

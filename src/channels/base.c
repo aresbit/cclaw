@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/channel.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 // Channel registry (similar to provider and memory registries)
 typedef struct {

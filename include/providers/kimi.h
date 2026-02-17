@@ -27,7 +27,7 @@ err_t kimi_set_context_window(provider_t* provider, uint32_t tokens);
 // Available Kimi models
 static const char* const KIMI_MODELS[] = {
     "kimi-k2-0905-Preview",
-    "moonshot-k2.5",
+    "kimi-k2.5",
     "kimi-k2-turbo-preview",
     "kimi-k2-thinking",
     "moonshot-v1-128k",        // 128K context

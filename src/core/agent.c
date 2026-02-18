@@ -210,7 +210,7 @@ agent_config_t agent_config_default(void) {
         .workspace_root = STR_NULL,
 
         .enable_extensions = true,
-        .extensions_dir = STR_LIT(AGENT_EXTENSION_DIR_DEFAULT),
+        .extensions_dir = STR_NULL,
         .hot_reload_extensions = true,
 
         .stream_responses = true,
@@ -352,6 +352,11 @@ static err_t agent_loop_iteration(agent_t* agent, agent_session_t* session,
     if (!agent || !session || !out_response) return ERR_INVALID_ARGUMENT;
 
     agent_context_t* ctx = agent->ctx;
+
+    // Check provider is initialized
+    if (!ctx->provider) {
+        return ERR_NOT_INITIALIZED;
+    }
 
     // Call LLM
     chat_response_t* llm_response = NULL;

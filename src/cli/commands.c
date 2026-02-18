@@ -72,12 +72,14 @@ err_t cmd_onboard(config_t* config, int argc, char** argv) {
     printf("\nAvailable providers: openrouter, anthropic, openai, kimi, deepseek\n");
     str_t api_key = prompt_input("Enter your API key", NULL);
     if (!str_empty(api_key)) {
+        if (config->api_key.data) free((void*)config->api_key.data);
         config->api_key = api_key;
     }
 
     // Provider
     str_t provider = prompt_input("Default provider (openrouter/anthropic/openai/kimi/deepseek)", "openrouter");
     if (!str_empty(provider)) {
+        if (config->default_provider.data) free((void*)config->default_provider.data);
         config->default_provider = provider;
     }
 
@@ -96,12 +98,14 @@ err_t cmd_onboard(config_t* config, int argc, char** argv) {
     }
     str_t model = prompt_input("Default model", default_model);
     if (!str_empty(model)) {
+        if (config->default_model.data) free((void*)config->default_model.data);
         config->default_model = model;
     }
 
     // Memory backend
     str_t memory = prompt_input("Memory backend (sqlite/markdown/none)", "sqlite");
     if (!str_empty(memory)) {
+        if (config->memory.backend.data) free((void*)config->memory.backend.data);
         config->memory.backend = memory;
     }
 

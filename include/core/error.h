@@ -20,6 +20,7 @@ typedef enum {
     ERR_TIMEOUT,
     ERR_CANCELLED,
     ERR_NOT_IMPLEMENTED,
+    ERR_NOT_INITIALIZED,
 
     // I/O errors
     ERR_IO,

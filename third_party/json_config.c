@@ -591,28 +591,38 @@ json_object_t* json_as_object(json_value_t* val) {
     return val->object;
 }
 
+// Forward declarations for printing helpers
+static void append_char(char** out, size_t* cap, size_t* len, char c);
+static void append_string(char** out, size_t* cap, size_t* len, const char* str);
+
 // Helper for printing
 static void print_indent(char** out, size_t* cap, size_t* len, int indent) {
     for (int i = 0; i < indent; i++) {
-        if (*len + 2 < *cap) {
-            (*out)[(*len)++] = ' ';
-            (*out)[(*len)++] = ' ';
-        }
+        append_char(out, cap, len, ' ');
+        append_char(out, cap, len, ' ');
     }
 }
 
 static void append_char(char** out, size_t* cap, size_t* len, char c) {
-    if (*len + 1 < *cap) {
-        (*out)[(*len)++] = c;
+    if (*len + 1 >= *cap) {
+        *cap *= 2;
+        char* new_out = realloc(*out, *cap);
+        if (!new_out) return;
+        *out = new_out;
     }
+    (*out)[(*len)++] = c;
 }
 
 static void append_string(char** out, size_t* cap, size_t* len, const char* str) {
     size_t slen = strlen(str);
-    if (*len + slen < *cap) {
-        memcpy(*out + *len, str, slen);
-        *len += slen;
+    while (*len + slen + 1 >= *cap) {
+        *cap *= 2;
+        char* new_out = realloc(*out, *cap);
+        if (!new_out) return;
+        *out = new_out;
     }
+    memcpy(*out + *len, str, slen);
+    *len += slen;
 }
 
 static void print_value(json_value_t* val, char** out, size_t* cap, size_t* len, int indent, bool pretty);
@@ -799,12 +809,7 @@ json_value_t* json_create_array(void) {
     if (!val) return NULL;
 
     val->type = JSON_ARRAY;
-    val->array = malloc(sizeof(json_array_t));
-    if (!val->array) {
-        free(val);
-        return NULL;
-    }
-    val->array->next = NULL;
+    val->array = NULL;  // Empty array, no head node
 
     return val;
 }

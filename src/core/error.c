@@ -22,6 +22,7 @@ static const struct {
     {ERR_TIMEOUT, "Timeout"},
     {ERR_CANCELLED, "Cancelled"},
     {ERR_NOT_IMPLEMENTED, "Not implemented"},
+    {ERR_NOT_INITIALIZED, "Not initialized"},
     {ERR_IO, "I/O error"},
     {ERR_FILE_NOT_FOUND, "File not found"},
     {ERR_FILE_EXISTS, "File exists"},

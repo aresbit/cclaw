@@ -9,6 +9,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <libgen.h>
+#include <unistd.h>
 
 // Default configuration values
 #define DEFAULT_PROVIDER "openrouter"
@@ -339,7 +341,12 @@ err_t config_load(str_t path, config_t** out_config) {
     err_t err = config_from_json_str(json, alloc, out_config);
     json_free(json);
 
-    if (err != ERR_OK) {
+    if (err == ERR_OK) {
+        // Set config_path for loaded config
+        if (*out_config) {
+            (*out_config)->config_path = str_dup_impl(STR_VIEW(config_path), alloc);
+        }
+    } else {
         // Error, use default
         config_t* config = config_default(alloc);
         if (!config) return ERR_OUT_OF_MEMORY;
@@ -370,7 +377,9 @@ err_t config_from_json_str(json_value_t* json, allocator_t* alloc, config_t** ou
 
     // API configuration
     const char* api_key = json_object_get_string(root, "api_key", NULL);
-    if (api_key) config->api_key = str_dup_impl(STR_VIEW(api_key), alloc);
+    if (api_key) {
+        config->api_key = str_dup_impl(STR_VIEW(api_key), alloc);
+    }
 
     const char* provider = json_object_get_string(root, "default_provider", NULL);
     if (provider) {
@@ -385,6 +394,13 @@ err_t config_from_json_str(json_value_t* json, allocator_t* alloc, config_t** ou
     }
 
     config->default_temperature = json_object_get_number(root, "default_temperature", DEFAULT_TEMPERATURE);
+
+    // Workspace directory
+    const char* workspace_dir = json_object_get_string(root, "workspace_dir", NULL);
+    if (workspace_dir) {
+        str_free_impl(config->workspace_dir, alloc);
+        config->workspace_dir = str_dup_impl(STR_VIEW(workspace_dir), alloc);
+    }
 
     // Memory configuration
     json_object_t* memory = json_object_get_object(root, "memory");
@@ -426,6 +442,33 @@ err_t config_from_json_str(json_value_t* json, allocator_t* alloc, config_t** ou
     return ERR_OK;
 }
 
+// Helper: Create parent directories for a file path (mkdir -p style)
+static int mkdir_p(const char* path) {
+    char tmp[512];
+    char* p = NULL;
+    size_t len;
+
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    len = strlen(tmp);
+    if (tmp[len - 1] == '/')
+        tmp[len - 1] = '\0';
+
+    for (p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            struct stat st;
+            if (stat(tmp, &st) != 0) {
+                if (mkdir(tmp, 0755) != 0)
+                    return -1;
+            } else if (!S_ISDIR(st.st_mode)) {
+                return -1;
+            }
+            *p = '/';
+        }
+    }
+    return 0;
+}
+
 // Save configuration to file
 err_t config_save(config_t* config, str_t path) {
     if (!config) return ERR_INVALID_ARGUMENT;
@@ -438,6 +481,14 @@ err_t config_save(config_t* config, str_t path) {
         snprintf(config_path, sizeof(config_path), "%.*s", (int)config->config_path.len, config->config_path.data);
     } else {
         snprintf(config_path, sizeof(config_path), "%.*s", (int)path.len, path.data);
+    }
+
+    // Create parent directories if they don't exist
+    char dir_path[512];
+    snprintf(dir_path, sizeof(dir_path), "%s", config_path);
+    char* dir = dirname(dir_path);
+    if (mkdir_p(dir) != 0) {
+        return ERR_IO;
     }
 
     // Convert to JSON

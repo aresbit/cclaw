@@ -374,3 +374,59 @@ sudo systemctl start cclaw
 ./bin/cclaw help agent
 ./bin/cclaw help daemon
 ```
+## Workspace 工作目录
+
+CClaw 使用 **workspace** 作为 Agent 的安全工作沙盒，限制文件操作范围。
+
+### 默认配置
+
+- **workspace_dir**: `~/.cclaw/workspace`（自动创建，不在 config.json 中显示）
+- **autonomy.workspace_only**: `true`（限制 agent 只能访问 workspace 内文件）
+
+### 相关配置项
+
+```json
+{
+  "autonomy": {
+    "workspace_only": true,           // 安全开关，限制文件访问范围
+    "max_actions_per_hour": 20,       // 每小时最大操作数
+    "allowed_commands": [...],        // 允许的命令白名单
+    "forbidden_paths": [...]          // 禁止访问的路径
+  },
+  "runtime": {
+    "docker": {
+      "mount_workspace": false,       // Docker 模式是否挂载 workspace
+      "allowed_workspace_roots": []   // 多 workspace 根目录白名单
+    }
+  }
+}
+```
+
+### 修改 Workspace
+
+**方法 1 - 环境变量**（推荐）：
+```bash
+export CCLAW_WORKSPACE=/path/to/your/workspace
+./bin/cclaw agent
+```
+
+**方法 2 - 环境变量（别的方式）**：
+```bash
+export ZEROCLAW_WORKSPACE=/path/to/workspace
+./bin/cclaw agent
+```
+
+### Workspace 用途
+
+1. **文件隔离**：防止 Agent 意外修改系统文件（如 `/etc`, `/usr` 等）
+2. **会话数据**：存储对话历史、记忆文件、临时文件
+3. **工具限制**：`file_read`/`file_write`/`shell` 工具默认只能在 workspace 内操作
+4. **项目隔离**：不同项目使用不同 workspace，避免文件冲突
+
+### 安全建议
+
+- 保持 `workspace_only: true`（默认）
+- 敏感项目使用独立 workspace
+- 定期清理 `~/.cclaw/workspace` 中的临时文件
+- 使用 Docker 模式时启用 `mount_workspace` 进行额外隔离
+

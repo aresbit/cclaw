@@ -3,6 +3,7 @@
 
 #include "runtime/tui.h"
 #include "core/alloc.h"
+#include "core/agent.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -234,9 +235,25 @@ err_t tui_create(const tui_config_t* config, tui_t** out_tui) {
     // Create panels
     for (int i = 0; i < 5; i++) {
         tui->panels[i] = calloc(1, sizeof(tui_panel_t));
+        if (!tui->panels[i]) {
+            // Cleanup on failure
+            for (int j = 0; j < i; j++) {
+                free(tui->panels[j]);
+            }
+            free(tui->history);
+            free(tui->input_buffer);
+            free(tui);
+            return ERR_OUT_OF_MEMORY;
+        }
         tui->panels[i]->type = i;
         tui->panels[i]->visible = true;
     }
+
+    // Initialize message list
+    tui->messages = NULL;
+    tui->messages_tail = NULL;
+    tui->message_count = 0;
+    tui->selected_session = 0;
 
     g_tui = tui;
     *out_tui = tui;
@@ -255,6 +272,16 @@ void tui_destroy(tui_t* tui) {
     }
     free(tui->history);
 
+    // Free messages
+    tui_message_t* msg = tui->messages;
+    while (msg) {
+        tui_message_t* next = msg->next;
+        free(msg->text);
+        free(msg->sender);
+        free(msg);
+        msg = next;
+    }
+
     for (int i = 0; i < 5; i++) {
         free(tui->panels[i]);
     }
@@ -269,8 +296,15 @@ void tui_destroy(tui_t* tui) {
 err_t tui_init_terminal(tui_t* tui) {
     if (!tui) return ERR_INVALID_ARGUMENT;
 
+    // Check if stdin is a TTY
+    if (!isatty(STDIN_FILENO)) {
+        fprintf(stderr, "Error: TUI requires an interactive terminal (TTY)\n");
+        return ERR_FAILED;
+    }
+
     // Save original terminal settings
     if (tcgetattr(STDIN_FILENO, &tui->original_termios) != 0) {
+        perror("tcgetattr failed");
         return ERR_FAILED;
     }
 
@@ -316,7 +350,7 @@ static void resize_handler(int sig) {
 }
 
 err_t tui_run(tui_t* tui, agent_t* agent) {
-    if (!tui) return ERR_INVALID_ARGUMENT;
+    if (!tui || !agent) return ERR_INVALID_ARGUMENT;
 
     tui->agent = agent;
     tui->running = true;
@@ -405,19 +439,40 @@ void tui_draw_sidebar(tui_t* tui) {
     uint16_t sidebar_w = 25;
     uint16_t sidebar_h = tui->config.height - 1;
 
-    tui_draw_box(0, 1, sidebar_w, sidebar_h, "Sessions");
+    const char* title = (tui->active_panel == TUI_PANEL_SIDEBAR) ? "Sessions (*)" : "Sessions";
+    tui_draw_box(0, 1, sidebar_w, sidebar_h, title);
 
     tui_set_color(tui->config.theme.color_muted, tui->config.theme.color_bg);
 
-    // List sessions (placeholder)
-    for (int i = 0; i < 5 && i < (int)sidebar_h - 3; i++) {
+    // List sessions from agent
+    uint32_t session_count = tui->agent ? tui->agent->ctx->session_count : 0;
+    uint32_t max_display = (sidebar_h > 3) ? sidebar_h - 3 : 0;
+
+    for (uint32_t i = 0; i < max_display; i++) {
         tui_move_cursor(2, 3 + i);
-        if (i == 0) {
+        
+        bool is_selected = (i == tui->selected_session);
+        bool is_active = false;
+        
+        if (i < session_count && tui->agent) {
+            is_active = (tui->agent->ctx->active_session == tui->agent->ctx->sessions[i]);
+        }
+        
+        // Highlight selected session
+        if (is_selected && tui->active_panel == TUI_PANEL_SIDEBAR) {
+            tui_set_color(tui->config.theme.color_bg, tui->config.theme.color_primary);
+        } else if (is_active) {
             tui_set_color(tui->config.theme.color_primary, tui->config.theme.color_bg);
-            printf("► main");
-            tui_set_color(tui->config.theme.color_muted, tui->config.theme.color_bg);
         } else {
-            printf("  session-%d", i);
+            tui_set_color(tui->config.theme.color_muted, tui->config.theme.color_bg);
+        }
+        
+        if (i < session_count) {
+            printf("%s %s", is_active ? ">" : " ", tui->agent->ctx->sessions[i]->name.data ? tui->agent->ctx->sessions[i]->name.data : "unnamed");
+        } else if (i == 0 && session_count == 0) {
+            printf("  (no sessions)");
+        } else {
+            break;
         }
     }
 
@@ -433,20 +488,73 @@ void tui_draw_chat_panel(tui_t* tui) {
     // Draw border
     tui_draw_box(x, y, w, h, NULL);
 
-    // Chat content area
+    // Chat content area - render messages
     tui_set_color(tui->config.theme.color_fg, tui->config.theme.color_bg);
 
-    // Placeholder messages
-    const char* messages[] = {
-        "Welcome to CClaw Agent!",
-        "Type a message to start chatting.",
-        "Use /help for commands.",
-        NULL
-    };
+    // Calculate visible message area
+    uint16_t max_lines = h - 2;
+    uint16_t line_y = y + 1;
 
-    for (int i = 0; messages[i] && i < (int)h - 2; i++) {
-        tui_move_cursor(x + 2, y + 1 + i);
-        printf("%s", messages[i]);
+    // Show placeholder if no messages
+    if (!tui->messages) {
+        const char* placeholder[] = {
+            "Welcome to CClaw Agent!",
+            "Type a message to start chatting.",
+            "Use /help for commands.",
+            NULL
+        };
+        for (int i = 0; placeholder[i] && i < (int)max_lines; i++) {
+            tui_move_cursor(x + 2, line_y + i);
+            printf("%s", placeholder[i]);
+        }
+    } else {
+        // Render messages from linked list
+        uint16_t lines_used = 0;
+        tui_message_t* msg = tui->messages;
+        
+        // Count total messages to show from the end
+        uint32_t msg_count = 0;
+        while (msg) {
+            msg_count++;
+            msg = msg->next;
+        }
+
+        // Show last N messages that fit
+        uint32_t skip = (msg_count > max_lines) ? msg_count - max_lines : 0;
+        msg = tui->messages;
+        for (uint32_t i = 0; i < skip && msg; i++) {
+            msg = msg->next;
+        }
+
+        // Render visible messages
+        while (msg && lines_used < max_lines) {
+            tui_move_cursor(x + 2, line_y + lines_used);
+            
+            // Color by sender
+            if (strcmp(msg->sender, "user") == 0) {
+                tui_set_color(tui->config.theme.color_success, tui->config.theme.color_bg);
+                printf("[You]: ");
+            } else if (strcmp(msg->sender, "assistant") == 0) {
+                tui_set_color(tui->config.theme.color_primary, tui->config.theme.color_bg);
+                printf("[AI]: ");
+            } else {
+                tui_set_color(tui->config.theme.color_muted, tui->config.theme.color_bg);
+                printf("[%s]: ", msg->sender);
+            }
+            
+            tui_set_color(tui->config.theme.color_fg, tui->config.theme.color_bg);
+            
+            // Print message text (truncate if too long)
+            uint16_t max_text_width = w - 10;
+            if (strlen(msg->text) > max_text_width) {
+                printf("%.*s...", max_text_width, msg->text);
+            } else {
+                printf("%s", msg->text);
+            }
+            
+            lines_used++;
+            msg = msg->next;
+        }
     }
 
     tui_reset_color();
@@ -463,8 +571,13 @@ void tui_draw_status_bar(tui_t* tui) {
     }
 
     char status[256];
+    const char* model_name = "unknown";
+    if (tui->agent && tui->agent->ctx && tui->agent->ctx->provider) {
+        model_name = tui->agent->ctx->provider->config.default_model.data;
+        if (!model_name) model_name = "unknown";
+    }
     snprintf(status, sizeof(status), " Model: %s  |  Tokens: %u  |  Branch: main ",
-             "claude-3.5-sonnet", 1234);
+             model_name, 0);
 
     tui_move_cursor(1, y);
     printf("%s", status);
@@ -523,21 +636,43 @@ err_t tui_process_input(tui_t* tui) {
         if (seq[0] == '[') {
             switch (seq[1]) {
                 case 'A': // Up arrow
-                    {
+                    if (tui->active_panel == TUI_PANEL_SIDEBAR) {
+                        // Navigate up in session list
+                        if (tui->selected_session > 0) {
+                            tui->selected_session--;
+                        }
+                    } else {
+                        // Normal history navigation
                         const char* hist = tui_history_prev(tui);
                         if (hist) {
-                            strncpy(tui->input_buffer, hist, tui->input_capacity - 1);
-                            tui->input_len = strlen(tui->input_buffer);
+                            size_t hist_len = strlen(hist);
+                            if (hist_len >= tui->input_capacity) {
+                                hist_len = tui->input_capacity - 1;
+                            }
+                            memcpy(tui->input_buffer, hist, hist_len);
+                            tui->input_buffer[hist_len] = '\0';
+                            tui->input_len = (uint32_t)hist_len;
                             tui->input_pos = tui->input_len;
                         }
                     }
                     break;
                 case 'B': // Down arrow
-                    {
+                    if (tui->active_panel == TUI_PANEL_SIDEBAR) {
+                        // Navigate down in session list
+                        if (tui->agent && tui->selected_session + 1 < tui->agent->ctx->session_count) {
+                            tui->selected_session++;
+                        }
+                    } else {
+                        // Normal history navigation
                         const char* hist = tui_history_next(tui);
                         if (hist) {
-                            strncpy(tui->input_buffer, hist, tui->input_capacity - 1);
-                            tui->input_len = strlen(tui->input_buffer);
+                            size_t hist_len = strlen(hist);
+                            if (hist_len >= tui->input_capacity) {
+                                hist_len = tui->input_capacity - 1;
+                            }
+                            memcpy(tui->input_buffer, hist, hist_len);
+                            tui->input_buffer[hist_len] = '\0';
+                            tui->input_len = (uint32_t)hist_len;
                             tui->input_pos = tui->input_len;
                         } else {
                             tui_input_clear(tui);
@@ -569,8 +704,52 @@ err_t tui_process_input(tui_t* tui) {
     }
 
     if (c == TUI_KEY_CTRL('n')) {
-        tui_chat_add_system_message(tui, "Created new branch");
-        tui->needs_redraw = true;
+        // Create new session
+        if (tui->agent) {
+            char name_buf[64];
+            snprintf(name_buf, sizeof(name_buf), "session-%u", tui->agent->ctx->session_count + 1);
+            str_t session_name = str_dup_cstr(name_buf, NULL);
+            agent_session_t* new_session = NULL;
+            err_t err = agent_session_create(tui->agent, &session_name, &new_session);
+            if (err == ERR_OK && new_session) {
+                // Copy model from active session or use default
+                if (tui->agent->ctx->active_session && !str_empty(tui->agent->ctx->active_session->model)) {
+                    new_session->model = str_dup(tui->agent->ctx->active_session->model, NULL);
+                }
+                tui->agent->ctx->active_session = new_session;
+                tui_chat_add_system_message(tui, "Created new session");
+            } else {
+                tui_chat_add_system_message(tui, "Error: Failed to create session");
+            }
+            free((void*)session_name.data);
+            tui->needs_redraw = true;
+        }
+        return ERR_OK;
+    }
+
+    if (c == TUI_KEY_CTRL('b')) {
+        // Create new branch (similar to new session but with branch semantics)
+        if (tui->agent && tui->agent->ctx->active_session) {
+            char name_buf[64];
+            snprintf(name_buf, sizeof(name_buf), "branch-%u", tui->agent->ctx->session_count + 1);
+            str_t branch_name = str_dup_cstr(name_buf, NULL);
+            // For now, just create a new session as branch
+            agent_session_t* new_branch = NULL;
+            err_t err = agent_session_create(tui->agent, &branch_name, &new_branch);
+            if (err == ERR_OK && new_branch) {
+                if (!str_empty(tui->agent->ctx->active_session->model)) {
+                    new_branch->model = str_dup(tui->agent->ctx->active_session->model, NULL);
+                }
+                tui->agent->ctx->active_session = new_branch;
+                tui_chat_add_system_message(tui, "Created new branch");
+            } else {
+                tui_chat_add_system_message(tui, "Error: Failed to create branch");
+            }
+            free((void*)branch_name.data);
+            tui->needs_redraw = true;
+        } else {
+            tui_chat_add_system_message(tui, "Error: No active session to branch from");
+        }
         return ERR_OK;
     }
 
@@ -579,14 +758,62 @@ err_t tui_process_input(tui_t* tui) {
         return ERR_OK;
     }
 
+    // Handle Tab key to switch panels
+    if (c == TUI_KEY_TAB) {
+        tui->active_panel = (tui->active_panel == TUI_PANEL_CHAT) ? TUI_PANEL_SIDEBAR : TUI_PANEL_CHAT;
+        tui->needs_redraw = true;
+        return ERR_OK;
+    }
+
     // Handle regular input
     switch (c) {
         case '\r':
         case '\n':
+            // If in sidebar, activate selected session
+            if (tui->active_panel == TUI_PANEL_SIDEBAR) {
+                if (tui->agent && tui->selected_session < tui->agent->ctx->session_count) {
+                    tui->agent->ctx->active_session = tui->agent->ctx->sessions[tui->selected_session];
+                    tui_chat_add_system_message(tui, "Switched session");
+                    tui->needs_redraw = true;
+                }
+                return ERR_OK;
+            }
+            
             // Submit input
             if (tui->input_len > 0) {
                 tui_history_add(tui, tui->input_buffer);
                 tui_chat_add_user_message(tui, tui->input_buffer);
+                
+                // Process message with agent if available
+                if (tui->agent && tui->agent->ctx && tui->agent->ctx->provider) {
+                    str_t user_input = str_dup_cstr(tui->input_buffer, NULL);
+                    str_t response = STR_NULL;
+                    
+                    // Find active session or create one
+                    agent_session_t* session = NULL;
+                    if (tui->agent->ctx->active_session) {
+                        session = tui->agent->ctx->active_session;
+                    } else if (tui->agent->ctx->session_count > 0) {
+                        session = tui->agent->ctx->sessions[0];
+                    }
+                    
+                    if (session) {
+                        err_t err = agent_process_message(tui->agent, session, &user_input, &response);
+                        if (err == ERR_OK && response.data) {
+                            tui_chat_add_assistant_message(tui, response.data);
+                            free((void*)response.data);
+                        } else {
+                            tui_chat_add_system_message(tui, "Error: Failed to get response");
+                        }
+                    } else {
+                        tui_chat_add_system_message(tui, "Error: No active session");
+                    }
+                    
+                    free((void*)user_input.data);
+                } else {
+                    tui_chat_add_system_message(tui, "Warning: No provider configured");
+                }
+                
                 tui_input_clear(tui);
             }
             break;
@@ -745,18 +972,45 @@ const char* tui_history_next(tui_t* tui) {
 // Chat Display
 // ============================================================================
 
+static void tui_chat_add_message_internal(tui_t* tui, const char* sender, const char* text) {
+    if (!tui || !text) return;
+
+    tui_message_t* msg = calloc(1, sizeof(tui_message_t));
+    if (!msg) return;
+
+    msg->sender = strdup(sender);
+    msg->text = strdup(text);
+    msg->timestamp = 0; // TODO: get actual timestamp
+    msg->next = NULL;
+
+    // Add to linked list
+    if (tui->messages_tail) {
+        tui->messages_tail->next = msg;
+    } else {
+        tui->messages = msg;
+    }
+    tui->messages_tail = msg;
+    tui->message_count++;
+
+    // Limit message count to prevent memory issues
+    if (tui->message_count > 1000) {
+        tui_message_t* old = tui->messages;
+        tui->messages = old->next;
+        free(old->text);
+        free(old->sender);
+        free(old);
+        tui->message_count--;
+    }
+}
+
 void tui_chat_add_system_message(tui_t* tui, const char* text) {
-    (void)tui;
-    // In real implementation, add to message list
-    printf("\r\n[System]: %s\r\n", text);
+    tui_chat_add_message_internal(tui, "system", text);
 }
 
 void tui_chat_add_user_message(tui_t* tui, const char* text) {
-    (void)tui;
-    printf("\r\n[User]: %s\r\n", text);
+    tui_chat_add_message_internal(tui, "user", text);
 }
 
 void tui_chat_add_assistant_message(tui_t* tui, const char* text) {
-    (void)tui;
-    printf("\r\n[Assistant]: %s\r\n", text);
+    tui_chat_add_message_internal(tui, "assistant", text);
 }

@@ -6,6 +6,7 @@
 #include "runtime/tui.h"
 #include "runtime/agent_loop.h"
 #include "core/agent.h"
+#include "providers/base.h"
 #include "cclaw.h"
 
 #include <stdio.h>
@@ -311,18 +312,64 @@ err_t cmd_status(config_t* config, int argc, char** argv) {
 err_t cmd_tui(config_t* config, int argc, char** argv) {
     (void)argc;
     (void)argv;
-    (void)config;
 
     printf("Starting CClaw TUI...\n");
 
-    // Create agent
+    // Create agent with config
     agent_config_t agent_config = agent_config_default();
+    agent_config.autonomy_level = config->autonomy.level;
+    agent_config.enable_shell_tool = true;
+    agent_config.workspace_root = str_dup(config->workspace_dir, NULL);
+
     agent_t* agent = NULL;
 
     err_t err = agent_create(&agent_config, &agent);
     if (err != ERR_OK) {
         fprintf(stderr, "Failed to create agent: %s\n", error_to_string(err));
         return err;
+    }
+
+    // Initialize provider if API key is configured
+    if (!str_empty(config->api_key)) {
+        provider_registry_init();
+
+        provider_config_t provider_config = {
+            .name = config->default_provider,
+            .api_key = config->api_key,
+            .base_url = STR_NULL,
+            .default_model = config->default_model,
+            .default_temperature = config->default_temperature,
+            .max_tokens = 4096,
+            .timeout_ms = 60000,
+            .stream = false,
+            .max_retries = 3,
+            .retry_delay_ms = 1000
+        };
+
+        const char* provider_name = str_empty(config->default_provider) ? "openrouter" : config->default_provider.data;
+
+        provider_t* provider = NULL;
+        err_t provider_err = provider_create(provider_name, &provider_config, &provider);
+        if (provider_err == ERR_OK) {
+            agent->ctx->provider = provider;
+        } else {
+            fprintf(stderr, "Warning: Failed to initialize provider '%s': %d\n", provider_name, provider_err);
+        }
+    }
+
+    // Create default session for TUI
+    agent_session_t* session = NULL;
+    str_t session_name = STR_LIT("tui");
+    err = agent_session_create(agent, &session_name, &session);
+    if (err != ERR_OK) {
+        fprintf(stderr, "Failed to create session: %s\n", error_to_string(err));
+        agent_destroy(agent);
+        return err;
+    }
+
+    // Set default model for session
+    if (!str_empty(config->default_model)) {
+        session->model = str_dup(config->default_model, NULL);
     }
 
     // Create TUI

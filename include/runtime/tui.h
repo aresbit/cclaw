@@ -57,6 +57,14 @@ struct tui_config_t {
     tui_theme_t theme;
 };
 
+// Chat message for TUI display
+typedef struct tui_message_t {
+    char* text;
+    char* sender;  // "user", "assistant", "system"
+    uint64_t timestamp;
+    struct tui_message_t* next;
+} tui_message_t;
+
 // TUI State
 struct tui_t {
     tui_config_t config;
@@ -84,9 +92,17 @@ struct tui_t {
     uint32_t history_pos;
     uint32_t history_capacity;
 
+    // Chat messages (simple linked list)
+    tui_message_t* messages;
+    tui_message_t* messages_tail;
+    uint32_t message_count;
+
     // Panels
     tui_panel_t* panels[5];
     tui_panel_type_t active_panel;
+
+    // Session selection in sidebar
+    uint32_t selected_session;
 
     // Scrolling
     uint32_t scroll_offset;

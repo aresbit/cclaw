@@ -54,6 +54,19 @@
 - `Ctrl+N`: 创建新 session，复制当前 session 的模型设置
 - `Ctrl+B`: 创建新 branch（实现为创建新 session）
 
+### 6. ✅ UTF-8 中文输入支持
+**文件**: `src/runtime/tui.c:844-918`
+**问题**: 输入中文（UTF-8 编码）导致崩溃
+**修复**:
+- 添加 UTF-8 辅助函数：
+  - `is_utf8_continuation()`: 判断是否为 UTF-8 续字节
+  - `utf8_char_len()`: 获取 UTF-8 字符字节长度
+  - `utf8_prev_char()`: 查找上一个 UTF-8 字符起始位置
+- 修改输入处理逻辑，识别并读取完整 UTF-8 字符序列
+- 修改 `tui_input_backspace()`: 删除整个 UTF-8 字符而非单个字节
+- 修改 `tui_input_delete()`: 删除当前 UTF-8 字符
+- 修改 `tui_input_move_left/right()`: 按 UTF-8 字符边界移动光标
+
 ## 键盘快捷键一览
 
 | 快捷键 | 功能 |

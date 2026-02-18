@@ -831,14 +831,90 @@ err_t tui_process_input(tui_t* tui) {
             tui_input_clear(tui);
             break;
         default:
-            if (isprint(c)) {
-                tui_input_insert(tui, c);
+            // Handle UTF-8 input
+            {
+                unsigned char uc = (unsigned char)c;
+                // Check if this is a valid UTF-8 start byte or ASCII
+                if ((uc & 0x80) == 0) {
+                    // ASCII character (0xxxxxxx)
+                    if (isprint(c) || c == ' ') {
+                        tui_input_insert(tui, c);
+                    }
+                } else if ((uc & 0xE0) == 0xC0) {
+                    // 2-byte UTF-8 sequence (110xxxxx)
+                    char utf8_seq[3] = {c, 0, 0};
+                    if (read(STDIN_FILENO, &utf8_seq[1], 1) == 1) {
+                        tui_input_insert(tui, utf8_seq[0]);
+                        tui_input_insert(tui, utf8_seq[1]);
+                    }
+                } else if ((uc & 0xF0) == 0xE0) {
+                    // 3-byte UTF-8 sequence (1110xxxx) - Chinese characters
+                    char utf8_seq[4] = {c, 0, 0, 0};
+                    if (read(STDIN_FILENO, &utf8_seq[1], 1) == 1 &&
+                        read(STDIN_FILENO, &utf8_seq[2], 1) == 1) {
+                        tui_input_insert(tui, utf8_seq[0]);
+                        tui_input_insert(tui, utf8_seq[1]);
+                        tui_input_insert(tui, utf8_seq[2]);
+                    }
+                } else if ((uc & 0xF8) == 0xF0) {
+                    // 4-byte UTF-8 sequence (11110xxx)
+                    char utf8_seq[5] = {c, 0, 0, 0, 0};
+                    if (read(STDIN_FILENO, &utf8_seq[1], 1) == 1 &&
+                        read(STDIN_FILENO, &utf8_seq[2], 1) == 1 &&
+                        read(STDIN_FILENO, &utf8_seq[3], 1) == 1) {
+                        tui_input_insert(tui, utf8_seq[0]);
+                        tui_input_insert(tui, utf8_seq[1]);
+                        tui_input_insert(tui, utf8_seq[2]);
+                        tui_input_insert(tui, utf8_seq[3]);
+                    }
+                }
+                // Invalid UTF-8 bytes are ignored
             }
             break;
     }
 
     tui->needs_redraw = true;
     return ERR_OK;
+}
+
+// ============================================================================
+// UTF-8 Helper Functions
+// ============================================================================
+
+// Check if a byte is a UTF-8 continuation byte (10xxxxxx)
+static bool is_utf8_continuation(char c) {
+    return (c & 0xC0) == 0x80;
+}
+
+// Get the length of a UTF-8 character starting at position pos
+static uint32_t utf8_char_len(const char* str, uint32_t pos) {
+    unsigned char c = (unsigned char)str[pos];
+    if ((c & 0x80) == 0) return 1;        // 0xxxxxxx - ASCII (1 byte)
+    if ((c & 0xE0) == 0xC0) return 2;    // 110xxxxx - 2 bytes
+    if ((c & 0xF0) == 0xE0) return 3;    // 1110xxxx - 3 bytes (Chinese)
+    if ((c & 0xF8) == 0xF0) return 4;    // 11110xxx - 4 bytes
+    return 1; // Invalid UTF-8, treat as single byte
+}
+
+// Find the start position of the previous UTF-8 character
+static uint32_t utf8_prev_char(const char* str, uint32_t pos) {
+    if (pos == 0) return 0;
+    // Move back until we find a non-continuation byte
+    do {
+        pos--;
+    } while (pos > 0 && is_utf8_continuation(str[pos]));
+    return pos;
+}
+
+// Count UTF-8 characters (not bytes) from start to end
+static uint32_t utf8_char_count(const char* str, uint32_t len) {
+    uint32_t count = 0;
+    uint32_t i = 0;
+    while (i < len) {
+        i += utf8_char_len(str, i);
+        count++;
+    }
+    return count;
 }
 
 // ============================================================================
@@ -869,36 +945,46 @@ void tui_input_insert(tui_t* tui, char c) {
 void tui_input_backspace(tui_t* tui) {
     if (!tui || tui->input_pos == 0) return;
 
-    // Shift characters left
-    for (uint32_t i = tui->input_pos - 1; i < tui->input_len - 1; i++) {
-        tui->input_buffer[i] = tui->input_buffer[i + 1];
+    // Find the start of the previous UTF-8 character
+    uint32_t prev_pos = utf8_prev_char(tui->input_buffer, tui->input_pos);
+    uint32_t char_len = tui->input_pos - prev_pos;
+
+    // Shift remaining characters left by char_len bytes
+    for (uint32_t i = prev_pos; i < tui->input_len - char_len; i++) {
+        tui->input_buffer[i] = tui->input_buffer[i + char_len];
     }
 
-    tui->input_len--;
-    tui->input_pos--;
+    tui->input_len -= char_len;
+    tui->input_pos = prev_pos;
     tui->input_buffer[tui->input_len] = '\0';
 }
 
 void tui_input_delete(tui_t* tui) {
     if (!tui || tui->input_pos >= tui->input_len) return;
 
-    for (uint32_t i = tui->input_pos; i < tui->input_len - 1; i++) {
-        tui->input_buffer[i] = tui->input_buffer[i + 1];
+    // Get the length of the UTF-8 character at current position
+    uint32_t char_len = utf8_char_len(tui->input_buffer, tui->input_pos);
+
+    // Shift remaining characters left
+    for (uint32_t i = tui->input_pos; i < tui->input_len - char_len; i++) {
+        tui->input_buffer[i] = tui->input_buffer[i + char_len];
     }
 
-    tui->input_len--;
+    tui->input_len -= char_len;
     tui->input_buffer[tui->input_len] = '\0';
 }
 
 void tui_input_move_left(tui_t* tui) {
     if (tui && tui->input_pos > 0) {
-        tui->input_pos--;
+        // Move to the start of the previous UTF-8 character
+        tui->input_pos = utf8_prev_char(tui->input_buffer, tui->input_pos);
     }
 }
 
 void tui_input_move_right(tui_t* tui) {
     if (tui && tui->input_pos < tui->input_len) {
-        tui->input_pos++;
+        // Move to the next UTF-8 character
+        tui->input_pos += utf8_char_len(tui->input_buffer, tui->input_pos);
     }
 }
 

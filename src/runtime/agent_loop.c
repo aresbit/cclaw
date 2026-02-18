@@ -200,12 +200,44 @@ err_t agent_runtime_init(config_t* config) {
         return err;
     }
 
+    // Set default model for session
+    if (!str_empty(config->default_model)) {
+        g_runtime.session->model = str_dup(config->default_model, NULL);
+    }
+
     // Set up signal handler
     signal(SIGINT, signal_handler);
 
     // Initialize provider
     if (!str_empty(config->api_key)) {
-        // TODO: Initialize provider with config
+        // Initialize provider registry
+        provider_registry_init();
+
+        // Create provider configuration
+        provider_config_t provider_config = {
+            .name = config->default_provider,
+            .api_key = config->api_key,
+            .base_url = STR_NULL,
+            .default_model = config->default_model,
+            .default_temperature = config->default_temperature,
+            .max_tokens = 4096,
+            .timeout_ms = 60000,
+            .stream = false,
+            .max_retries = 3,
+            .retry_delay_ms = 1000
+        };
+
+        // Get provider name
+        const char* provider_name = str_empty(config->default_provider) ? "openrouter" : config->default_provider.data;
+
+        // Create provider
+        provider_t* provider = NULL;
+        err_t provider_err = provider_create(provider_name, &provider_config, &provider);
+        if (provider_err == ERR_OK) {
+            g_runtime.agent->ctx->provider = provider;
+        } else {
+            fprintf(stderr, "Warning: Failed to initialize provider '%s': %d\n", provider_name, provider_err);
+        }
     }
 
     g_runtime.running = true;

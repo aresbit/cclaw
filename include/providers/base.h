@@ -177,7 +177,7 @@ char* provider_build_chat_request(const provider_t* provider,
 // Default model names
 #define DEFAULT_OPENROUTER_MODEL "anthropic/claude-3.5-sonnet"
 #define DEFAULT_DEEPSEEK_MODEL "deepseek-chat"
-#define DEFAULT_KIMI_MODEL "moonshot-v1-8k"
+#define DEFAULT_KIMI_MODEL "moonshot-k2.5"
 #define DEFAULT_OPENAI_MODEL "gpt-4o"
 #define DEFAULT_ANTHROPIC_MODEL "claude-3-5-sonnet-20241022"
 

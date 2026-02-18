@@ -29,8 +29,8 @@ make clean && make
 ```
 
 按提示输入：
-- API Key (从 OpenRouter/Anthropic/OpenAI 获取)
-- 默认提供商 (openrouter/anthropic/openai)
+- API Key (从 OpenRouter/Anthropic/OpenAI/kimi/deepseek 获取)
+- 默认提供商 (openrouter/anthropic/openai/kimi/deepseek)
 - 默认模型
 - 内存后端 (sqlite/markdown/none)
 
